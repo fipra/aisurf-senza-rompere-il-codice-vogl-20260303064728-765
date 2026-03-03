@@ -424,9 +424,10 @@
             }
 
             const data = await response.json();
-            if (model.includes('gemini')) return data.candidates[0].content.parts[0].text;
-            if (model.includes('claude')) return data.content[0].text;
-            return data.choices ? data.choices[0].message.content : "Response format error";
+            if (isOpenRouter) return data?.choices?.[0]?.message?.content ?? "Response format error";
+            if (model.includes('gemini')) return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Response format error";
+            if (model.includes('claude')) return data?.content?.[0]?.text ?? "Response format error";
+            return data?.choices?.[0]?.message?.content ?? "Response format error";
         }
     </script>
 </body>
