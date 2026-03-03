@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fipraai - AI Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #212121;
+            color: #ececec;
+        }
+        .sidebar {
+            background-color: #171717;
+            transition: transform 0.3s ease-in-out;
+        }
+        @media (max-width: 768px) {
+            .sidebar {
+                position: absolute;
+                z-index: 50;
+                height: 100%;
+                transform: translateX(-100%);
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+        }
+        .chat-input-container {
+            background-color: #2f2f2f;
+        }
+        .user-msg {
+            background-color: #2f2f2f;
+        }
+        .ai-msg {
+            background-color: transparent;
+        }
+        .settings-modal {
+            background-color: rgba(0, 0, 0, 0.8);
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+        .hidden {
+            display: none;
+        }
+        .loader {
+            border-top-color: #10b981;
+            animation: spinner 1.5s linear infinite;
+        }
+        @keyframes spinner {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar Overlay for Mobile -->
+    <div id="sidebarOverlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden md:hidden"></div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar w-64 flex-shrink-0 flex flex-col">
+        <div class="p-4">
+            <button onclick="createNewChat()" class="w-full flex items-center justify-between p-3 rounded-lg border border-gray-600 hover:bg-gray-800 transition-colors mb-4">
+                <span class="flex items-center gap-2"><i data-lucide="plus-circle" class="w-5 h-5"></i> New Chat</span>
+                <i data-lucide="square-pen" class="w-4 h-4"></i>
+            </button>
+        </div>
+        <div id="chatHistory" class="flex-1 overflow-y-auto px-4 space-y-2">
+            <!-- History loaded dynamically -->
+        </div>
+        <div class="p-4 border-t border-gray-700">
+            <button onclick="toggleSettings()" class="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors text-sm">
+                <i data-lucide="settings" class="w-5 h-5"></i> API Settings
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col relative w-full">
+        <!-- Header -->
+        <header class="p-4 flex justify-between items-center border-b border-gray-700">
+            <div class="flex items-center gap-2 md:gap-4">
+                <button onclick="toggleSidebar()" class="md:hidden p-1"><i data-lucide="menu"></i></button>
+                <select id="modelSelector" class="bg-transparent font-semibold text-sm md:text-lg outline-none cursor-pointer max-w-[150px] md:max-w-none">
+                    <optgroup label="Ollama (Local)" id="ollamaGroup" class="bg-zinc-800">
+                        <option value="">Loading...</option>
+                    </optgroup>
+                    <optgroup label="OpenRouter (Recommended)" class="bg-zinc-800">
+                        <option value="openrouter/anthropic/claude-sonnet-4.6">claude-sonnet-4.6 [OR]</option>
+                        <option value="openrouter/openai/gpt-5.2">gpt-5.2 [OR]</option>
+                        <option value="openrouter/google/gemini-3-flash-preview">gemini-3-flash-preview [OR]</option>
+                    </optgroup>
+                    <optgroup label="Direct API (Requires CORS)" class="bg-zinc-800">
+                        <option value="gpt-5.2">GPT-5.2</option>
+                        <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
+                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                    </optgroup>
+                </select>
+                <button onclick="fetchOllamaModels()" class="text-gray-400 hover:text-white" title="Refresh local models">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <h1 class="text-xl font-bold text-emerald-500 hidden sm:block">Fipraai</h1>
+            <div class="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-tr from-emerald-400 to-blue-500 flex items-center justify-center font-bold text-sm md:text-base">
+                F
+            </div>
+        </header>
+
+        <!-- Chat Messages Area -->
+        <div id="chatArea" class="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth">
+            <div id="welcomeMsg" class="max-w-3xl mx-auto flex flex-col items-center justify-center h-full text-center">
+                <h2 class="text-4xl font-bold mb-4 text-gray-400 opacity-20">Fipraai</h2>
+                <p class="text-gray-500">Enter API Keys or connect to local Ollama to start.</p>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="p-4 md:p-8">
+            <div class="max-w-3xl mx-auto">
+                <div class="chat-input-container rounded-2xl p-3 md:p-4 shadow-xl">
+                    <div id="attachmentPreview" class="flex flex-wrap gap-2 mb-2"></div>
+                    <textarea id="userInput" rows="1" class="bg-transparent w-full outline-none resize-none text-gray-200 placeholder-gray-500" placeholder="Send a message..." oninput="autoGrow(this)" onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendMessage(); }"></textarea>
+                    <div class="flex justify-between items-center mt-2">
+                        <div class="flex gap-2">
+                            <input type="file" id="fileUpload" class="hidden" multiple onchange="handleFiles(this.files)">
+                            <button onclick="document.getElementById('fileUpload').click()" class="p-2 hover:bg-gray-600 rounded-lg text-gray-400">
+                                <i data-lucide="paperclip" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        <button id="sendBtn" onclick="handleSendMessage()" class="bg-white text-black p-2 rounded-full hover:bg-gray-200 disabled:opacity-50 transition-all">
+                            <i data-lucide="arrow-up" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+                <p class="text-center text-[10px] md:text-xs text-gray-500 mt-3">Fipraai uses your personal API keys or local Ollama engine.</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 settings-modal flex items-center justify-center z-50 hidden p-4">
+        <div class="bg-zinc-900 border border-gray-700 w-full max-w-md p-6 rounded-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold">Settings</h3>
+                <button onclick="toggleSettings()" class="text-gray-400 hover:text-white">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Ollama URL (Local)</label>
+                    <input type="text" id="ollama_url" placeholder="http://localhost:11434" class="w-full bg-zinc-800 border border-gray-700 rounded-lg p-2 outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">OpenRouter API Key</label>
+                    <input type="password" id="openrouter_key" class="w-full bg-zinc-800 border border-gray-700 rounded-lg p-2 outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">OpenAI API Key</label>
+                    <input type="password" id="openai_key" class="w-full bg-zinc-800 border border-gray-700 rounded-lg p-2 outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Anthropic API Key</label>
+                    <input type="password" id="anthropic_key" class="w-full bg-zinc-800 border border-gray-700 rounded-lg p-2 outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Google Gemini API Key</label>
+                    <input type="password" id="gemini_key" class="w-full bg-zinc-800 border border-gray-700 rounded-lg p-2 outline-none focus:border-emerald-500">
+                </div>
+                <button onclick="saveSettings()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg mt-4 transition-colors">
+                    Save Configuration
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentChatId = Date.now();
+        let chats = JSON.parse(localStorage.getItem('fipraai_chats')) || [];
+        let settings = JSON.parse(localStorage.getItem('fipraai_settings')) || { 
+            openai_key: '', 
+            anthropic_key: '', 
+            gemini_key: '', 
+            openrouter_key: '',
+            ollama_url: 'http://localhost:11434'
+        };
+        let attachments = [];
+
+        window.onload = () => {
+            lucide.createIcons();
+            renderHistory();
+            loadSettings();
+            fetchOllamaModels();
+            if (chats.length > 0) loadChat(chats[chats.length - 1].id);
+        };
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('hidden');
+        }
+
+        async function fetchOllamaModels() {
+            const url = settings.ollama_url || 'http://localhost:11434';
+            const group = document.getElementById('ollamaGroup');
+            try {
+                const response = await fetch(`${url}/api/tags`);
+                const data = await response.json();
+                group.innerHTML = '';
+                if (data.models && data.models.length > 0) {
+                    data.models.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = `ollama/${m.name}`;
+                        opt.textContent = m.name;
+                        group.appendChild(opt);
+                    });
+                } else {
+                    group.innerHTML = '<option value="">No models found</option>';
+                }
+            } catch (e) {
+                group.innerHTML = '<option value="">Ollama not connected</option>';
+                console.log("Ollama not detected.");
+            }
+        }
+
+        function autoGrow(element) {
+            element.style.height = "5px";
+            element.style.height = (element.scrollHeight) + "px";
+        }
+
+        function toggleSettings() {
+            document.getElementById('settingsModal').classList.toggle('hidden');
+        }
+
+        function loadSettings() {
+            document.getElementById('openai_key').value = settings.openai_key || '';
+            document.getElementById('anthropic_key').value = settings.anthropic_key || '';
+            document.getElementById('gemini_key').value = settings.gemini_key || '';
+            document.getElementById('openrouter_key').value = settings.openrouter_key || '';
+            document.getElementById('ollama_url').value = settings.ollama_url || 'http://localhost:11434';
+        }
+
+        function saveSettings() {
+            settings = {
+                openai_key: document.getElementById('openai_key').value.trim(),
+                anthropic_key: document.getElementById('anthropic_key').value.trim(),
+                gemini_key: document.getElementById('gemini_key').value.trim(),
+                openrouter_key: document.getElementById('openrouter_key').value.trim(),
+                ollama_url: document.getElementById('ollama_url').value.trim() || 'http://localhost:11434'
+            };
+            localStorage.setItem('fipraai_settings', JSON.stringify(settings));
+            fetchOllamaModels();
+            toggleSettings();
+        }
+
+        function handleFiles(files) {
+            const preview = document.getElementById('attachmentPreview');
+            Array.from(files).forEach(file => {
+                attachments.push(file.name);
+                const chip = document.createElement('div');
+                chip.className = 'flex items-center gap-1 bg-zinc-700 text-xs p-1 px-2 rounded-full';
+                chip.innerHTML = `<span>${file.name}</span>`;
+                preview.appendChild(chip);
+            });
+        }
+
+        function createNewChat() {
+            currentChatId = Date.now();
+            document.getElementById('chatArea').innerHTML = '';
+            document.getElementById('welcomeMsg')?.classList.remove('hidden');
+            if (window.innerWidth < 768) toggleSidebar();
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('chatHistory');
+            container.innerHTML = '';
+            chats.slice().reverse().forEach(chat => {
+                const btn = document.createElement('button');
+                btn.className = `w-full text-left p-2 rounded hover:bg-zinc-800 truncate text-sm mb-1 ${chat.id === currentChatId ? 'bg-zinc-800' : ''}`;
+                btn.textContent = chat.title || "New Conversation";
+                btn.onclick = () => loadChat(chat.id);
+                container.appendChild(btn);
+            });
+        }
+
+        function loadChat(id) {
+            currentChatId = id;
+            const chat = chats.find(c => c.id === id);
+            if (chat) {
+                const chatArea = document.getElementById('chatArea');
+                chatArea.innerHTML = '';
+                chat.messages.forEach(msg => appendMessage(msg.role, msg.content));
+                if (window.innerWidth < 768 && document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+            }
+            renderHistory();
+        }
+
+        function appendMessage(role, content) {
+            document.getElementById('welcomeMsg')?.classList.add('hidden');
+            const chatArea = document.getElementById('chatArea');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} w-full`;
+            
+            const innerDiv = document.createElement('div');
+            innerDiv.className = `max-w-[85%] md:max-w-2xl p-4 rounded-2xl ${role === 'user' ? 'user-msg' : 'ai-msg'}`;
+            
+            if (role === 'assistant') {
+                innerDiv.innerHTML = `<div class="prose prose-invert max-w-none text-sm md:text-base">${marked.parse(content)}</div>`;
+            } else {
+                innerDiv.textContent = content;
+                innerDiv.classList.add('text-sm', 'md:text-base');
+            }
+
+            msgDiv.appendChild(innerDiv);
+            chatArea.appendChild(msgDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            return innerDiv;
+        }
+
+        async function handleSendMessage() {
+            const input = document.getElementById('userInput');
+            const text = input.value.trim();
+            const model = document.getElementById('modelSelector').value;
+            
+            if (!text || !model) return;
+
+            let chat = chats.find(c => c.id === currentChatId);
+            if (!chat) {
+                chat = { id: currentChatId, title: text.substring(0, 30), messages: [] };
+                chats.push(chat);
+            }
+
+            appendMessage('user', text);
+            chat.messages.push({ role: 'user', content: text });
+            
+            input.value = '';
+            input.style.height = 'auto';
+
+            const aiMsgDiv = appendMessage('assistant', '...');
+            aiMsgDiv.innerHTML = '<div class="loader ease-linear rounded-full border-2 border-t-2 border-gray-200 h-5 w-5"></div>';
+
+            try {
+                const responseText = await callAI(model, chat.messages);
+                aiMsgDiv.innerHTML = `<div class="prose prose-invert max-w-none">${marked.parse(responseText)}</div>`;
+                chat.messages.push({ role: 'assistant', content: responseText });
+                localStorage.setItem('fipraai_chats', JSON.stringify(chats));
+                renderHistory();
+            } catch (error) {
+                aiMsgDiv.innerHTML = `<span class="text-red-400">Error: ${error.message}</span>`;
+            }
+        }
+
+        async function callAI(model, messages) {
+            let url, key, body;
+
+            if (model.startsWith('ollama/')) {
+                url = `${settings.ollama_url || 'http://localhost:11434'}/api/chat`;
+                body = {
+                    model: model.replace('ollama/', ''),
+                    messages: messages,
+                    stream: false
+                };
+                const response = await fetch(url, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify(body) 
+                });
+                if (!response.ok) throw new Error("Ollama Error: ensure it is running and CORS is configured (OLLAMA_ORIGIN='*')");
+                const data = await response.json();
+                return data.message.content;
+            }
+
+            const isOpenRouter = model.startsWith('openrouter/');
+            if (isOpenRouter) {
+                url = "https://openrouter.ai/api/v1/chat/completions";
+                key = settings.openrouter_key;
+                if (!key) throw new Error("Missing OpenRouter API Key");
+                body = { model: model.replace('openrouter/', ''), messages: messages };
+            } else if (model.includes('gpt')) {
+                url = "https://api.openai.com/v1/chat/completions";
+                key = settings.openai_key;
+                if (!key) throw new Error("Missing OpenAI API Key");
+                body = { model, messages };
+            } else if (model.includes('claude')) {
+                url = "https://api.anthropic.com/v1/messages";
+                key = settings.anthropic_key;
+                if (!key) throw new Error("Missing Anthropic API Key");
+                body = { model, max_tokens: 4096, messages: messages.filter(m => m.role !== 'system') };
+            } else if (model.includes('gemini')) {
+                url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.gemini_key}`;
+                key = settings.gemini_key;
+                if (!key) throw new Error("Missing Gemini API Key");
+                body = { contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })) };
+            } else {
+                throw new Error("Unsupported provider");
+            }
+
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(isOpenRouter ? { 'Authorization': `Bearer ${key}` } : {}),
+                ...(model.includes('gpt') && !isOpenRouter ? { 'Authorization': `Bearer ${key}` } : {}),
+                ...(model.includes('claude') && !isOpenRouter ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' } : {})
+            };
+
+            const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error?.message || `API Error (${response.status})`);
+            }
+
+            const data = await response.json();
+            if (model.includes('gemini')) return data.candidates[0].content.parts[0].text;
+            if (model.includes('claude')) return data.content[0].text;
+            return data.choices ? data.choices[0].message.content : "Response format error";
+        }
+    </script>
+</body>
+</html>
